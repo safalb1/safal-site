@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+backend/node_modules/
+
+# secrets — never commit real env files
+.env
+.env.*
+!.env.example
+
+# logs / runtime
+*.log
+npm-debug.log*
+pids/
+*.pid
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
+
+# build output (none today, but future-proof)
+dist/
+build/

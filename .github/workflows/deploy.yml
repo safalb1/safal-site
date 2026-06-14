@@ -1,0 +1,44 @@
+# Auto-publishes the static frontend to GitHub Pages on every push to main.
+# After the first run: repo → Settings → Pages → Source = "GitHub Actions".
+name: Deploy site to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Assemble ONLY the static frontend into ./site so the backend source,
+      # node_modules, env files, etc. are never published to the public web.
+      - name: Stage frontend
+        run: |
+          mkdir -p site
+          cp index.html site/
+          # Add any other static assets here, e.g.:
+          # cp -r assets site/ 2>/dev/null || true
+          touch site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "site"
+      - id: deployment
+        uses: actions/deploy-pages@v4
