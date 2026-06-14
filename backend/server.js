@@ -92,10 +92,11 @@ app.post("/api/waitlist", waitlistLimiter, async (req, res) => {
 
   try {
     // ON CONFLICT = signing up twice is harmless, not an error.
-    await pool.query(
+    const { rowCount } = await pool.query(
       "insert into waitlist (email) values ($1) on conflict (email) do nothing",
       [email]
     );
+    if (rowCount > 0) signupCount += rowCount; // optimistic bump for the live readout
     res.status(201).json({ ok: true });
   } catch (err) {
     console.error("[waitlist]", err.message);
@@ -121,14 +122,32 @@ app.get("/api/waitlist/count", async (_req, res) => {
  * ------------------------------------------------------------------------- */
 const clients = new Set();
 
+// --- real backend signals mixed into the telemetry stream ---
+// signupCount is cached and refreshed periodically so we don't hit the DB
+// on every 2s broadcast; it's also bumped optimistically on each new signup.
+let signupCount = 0;
+async function refreshSignups() {
+  if (!HAS_DB) return;
+  try {
+    signupCount = await countWaitlist();
+  } catch {
+    /* leave the last good value */
+  }
+}
+
 function meshSnapshot() {
   const wave = Math.sin(Date.now() / 4000);
   return {
+    // synthetic "mesh" values (fictional product — these drive the visuals)
     nodes: Math.round(4096 + wave * 30 + (Math.random() * 20 - 10)),
     tps: 1.1e6 + Math.random() * 0.3e6,
     lat: 36 + Math.random() * 6,
     gpu: 68 + Math.random() * 22,
     queue: 400 + Math.random() * 1200,
+    // REAL signals from this running server
+    uptime: Math.floor(process.uptime()),
+    clients: clients.size,
+    signups: signupCount,
   };
 }
 
@@ -191,6 +210,8 @@ app.use((err, _req, res, _next) => {
 async function start() {
   if (HAS_DB) {
     await migrate();
+    await refreshSignups();
+    setInterval(refreshSignups, 20_000); // keep the live count fresh
   } else {
     console.warn("⚠ No DATABASE_URL set — running in DEMO mode (signups are not stored).");
   }
