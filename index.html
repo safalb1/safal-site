@@ -63,7 +63,7 @@
   /* ============ preloader / boot sequence ============ */
   #boot{position:fixed;inset:0;z-index:200;background:var(--void);display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:26px;transition:opacity .8s ease,visibility .8s}
-  #boot.done{opacity:0;visibility:hidden}
+  #boot.done{opacity:0;visibility:hidden;pointer-events:none}
   .boot-logo{display:flex;align-items:center;gap:14px;font-family:var(--display);font-weight:700;
     letter-spacing:.2em;font-size:22px}
   .boot-logo .dot{width:13px;height:13px;border-radius:3px;background:var(--cyan);box-shadow:0 0 22px var(--cyan);animation:pulse 1.6s ease-in-out infinite}
@@ -453,14 +453,17 @@ const $ = (id) => document.getElementById(id);
 (function boot(){
   const fill=$("bootfill"), log=$("bootlog");
   const lines=["initializing mesh…","handshaking <b>4,096</b> nodes","syncing weights","warming edge regions","mesh online <b>✓</b>"];
-  if(reduced){ document.body.classList.remove("boot"); $("boot").classList.add("done"); init(); return; }
+  // dismiss the boot overlay AND drop it from the layout so it can never
+  // intercept clicks on the page underneath.
+  const done=()=>{document.body.classList.remove("boot");const b=$("boot");
+    b.classList.add("done");init();setTimeout(()=>{b.style.display="none";},900);};
+  if(reduced){ done(); return; }
   let p=0,i=0;
   const iv=setInterval(()=>{
     p=Math.min(p+Math.random()*18+6,100); fill.style.width=p+"%";
     const idx=Math.min(Math.floor(p/20),lines.length-1);
     if(idx!==i){i=idx;log.innerHTML=lines[i];}
-    if(p>=100){clearInterval(iv);
-      setTimeout(()=>{document.body.classList.remove("boot");$("boot").classList.add("done");init();},420);}
+    if(p>=100){clearInterval(iv); setTimeout(done,420);}
   },230);
 })();
 
