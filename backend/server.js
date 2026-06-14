@@ -5,6 +5,7 @@ import helmet from "helmet";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
 import { pool, migrate, ping, countWaitlist } from "./db.js";
+import { sendWelcome, mailerEnabled } from "./mailer.js";
 
 /* ---------------------------------------------------------------------------
  * Environment
@@ -57,7 +58,7 @@ const isEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 /* ---------------------------------------------------------------------------
  * Health & readiness — hosts ping these to know the server is alive.
  * ------------------------------------------------------------------------- */
-app.get("/api/health", (_req, res) => res.json({ ok: true, env: NODE_ENV, db: HAS_DB }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, env: NODE_ENV, db: HAS_DB, email: mailerEnabled }));
 
 app.get("/api/ready", async (_req, res) => {
   if (!HAS_DB) return res.json({ ok: true, db: false }); // db optional in demo mode
@@ -96,7 +97,11 @@ app.post("/api/waitlist", waitlistLimiter, async (req, res) => {
       "insert into waitlist (email) values ($1) on conflict (email) do nothing",
       [email]
     );
-    if (rowCount > 0) signupCount += rowCount; // optimistic bump for the live readout
+    if (rowCount > 0) {
+      signupCount += rowCount; // optimistic bump for the live readout
+      // Fire-and-forget: a slow/failed email must not fail the signup itself.
+      sendWelcome(email).catch((e) => console.error("[email]", e.message));
+    }
     res.status(201).json({ ok: true });
   } catch (err) {
     console.error("[waitlist]", err.message);
@@ -215,6 +220,7 @@ async function start() {
   } else {
     console.warn("⚠ No DATABASE_URL set — running in DEMO mode (signups are not stored).");
   }
+  console.log(mailerEnabled ? "✓ email enabled (Resend)" : "⚠ email disabled (set RESEND_API_KEY to enable)");
   const server = app.listen(PORT, () => console.log(`✓ SAFAL API on :${PORT} (${NODE_ENV})`));
 
   const shutdown = (sig) => {
