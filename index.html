@@ -1044,6 +1044,8 @@ function hue(o){const base=185+Math.sin(t*0.0004)*60;return `hsla(${base+o},90%,
 function hueWild(o){const base=(48+t*4+o)%360;return `hsla(${base},98%,60%,`;}
 // silver-white that shifts its tint slowly (for the small right companion globe)
 function hueSilver(o){const base=(t*0.5+o)%360;return `hsla(${base},24%,86%,`;}
+// rapid cycle through all LIGHT/pastel colours, starting from light yellow (big globe)
+function hueLight(o){const base=(55+t*3+o)%360;return `hsla(${base},90%,80%,`;}
 
 /* draw one network globe (rings + rotating wireframe + glow) at (gx,gy) with
    radius gRad, colour from hf(offset) and overall opacity al. Rotation is shared
@@ -1069,12 +1071,12 @@ function drawGlobe(gx,gy,gRad,hf,al,cosY,sinY,cosX,sinX,rings=true){
     const persp=gRad*2.4/(gRad*2.4-z*gRad);
     proj.push({sx:gx+x*gRad*persp,sy:gy+y*gRad*persp,z});
   }
-  for(const[i,j]of edges){const a=proj[i],b=proj[j];
+  if(gRad>30) for(const[i,j]of edges){const a=proj[i],b=proj[j];   // LOD: skip mesh when far/tiny
     const depth=(a.z+b.z)/2, ea=0.10+(depth+1)/2*0.42;
     ctx.strokeStyle=hf(0)+ea.toFixed(3)+")";ctx.lineWidth=0.6+(depth+1)/2*0.8;
     ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
   }
-  for(const p of proj){const na=0.3+(p.z+1)/2*0.7,s=0.8+(p.z+1)/2*1.8;
+  if(gRad>11) for(const p of proj){const na=0.3+(p.z+1)/2*0.7,s=0.8+(p.z+1)/2*1.8;
     ctx.fillStyle=hf(30)+na.toFixed(3)+")";ctx.beginPath();ctx.arc(p.sx,p.sy,s,0,7);ctx.fill();
   }
   const g=ctx.createRadialGradient(gx,gy,0,gx,gy,gRad*1.6);
@@ -1129,23 +1131,45 @@ function frame(){
   // main globe — recedes + fades as you scroll down
   drawGlobe(cx,cy,rad,hue,globeFade,cosY,sinY,cosX,sinX);
 
-  // companion globes — hidden at load; they SLIDE in from the screen edges as you
-  // scroll DOWN and slide back out as you scroll UP (driven by scroll position, so
-  // zoom-in and zoom-out feel symmetric).
-  const slide=Math.max(0,Math.min(1,(zoomEase-0.04)/0.55));
-  if(slide>0.003){
-    const base=R();
-    const s01=slide*slide*(3-2*slide);                    // smoothed slide
-    const lerp=(a,b)=>a+(b-a)*s01;
-    // left · slightly smaller · fully visible · bright yellow rapidly shifting · enters from the LEFT edge
-    const rL=base*0.80, fxL=cx-W*0.31, fyL=cy+H*0.05;
-    drawGlobe(lerp(-rL*1.9, fxL), fyL, rL, hueWild, Math.min(1,slide*1.4), cosY,sinY,cosX,sinX, false);
-    // right · ~30% size · silver-white slowly shifting · partly visible · enters from the RIGHT edge
-    const rR=base*0.30, fxR=cx+W*0.31, fyR=cy+H*0.17;
-    drawGlobe(lerp(W+rR*1.9, fxR), fyR, rR, hueSilver, Math.min(0.6,slide*0.95), cosY,sinY,cosX,sinX, false);
-    // top-right · truncated by the corner · enters diagonally from the top-right edge
-    const rT=base*0.60, fxT=W*0.93, fyT=H*0.10;
-    drawGlobe(lerp(W+rT*1.6, fxT), lerp(-rT*1.6, fyT), rT, hue, Math.min(1,slide*1.4), cosY,sinY,cosX,sinX, false);
+  // companion globe FIELD — spread across the WHOLE page (driven by full-page
+  // scroll, not just the hero). Like roadside statues from a rear-facing camera:
+  // each enters from its edge, then recedes toward the centre vanishing point and
+  // shrinks as you scroll down (distance grows the further you go). More and more
+  // come into view the deeper you scroll; scroll up reverses it. None vanish.
+  const docH=(document.documentElement.scrollHeight||H)-(innerHeight||H);
+  const pageProg=docH>4?Math.max(0,Math.min(1,scrollY/docH)):0;
+  const base=R(), HW=W*0.5, HH=H*0.5, ZNEAR=0.85, ZFAR=2.8, SPAN=6.0;
+  // Same zoom-OUT as the main globe: each companion appears near at its side (large)
+  // at its anchor, then as you scroll DOWN it recedes toward the centre vanishing
+  // point — shrinking and going faint into the distance. Scroll UP brings it back.
+  // wx = which side / how far off-axis (− left, + right) · wy = height · ws = size.
+  const field=[
+    {wx:-0.85, wy: 0.10, ws:1.05, anchor:0.06, hf:hueWild},
+    {wx: 0.92, wy:-0.20, ws:0.95, anchor:0.18, hf:hue},
+    {wx:-0.95, wy:-0.08, ws:1.10, anchor:0.30, hf:hueSilver},
+    {wx: 0.82, wy: 0.26, ws:1.00, anchor:0.42, hf:hue},
+    {wx:-0.88, wy: 0.22, ws:1.05, anchor:0.54, hf:hueWild},
+    {wx: 0.95, wy:-0.16, ws:1.10, anchor:0.66, hf:hueSilver},
+    {wx:-0.80, wy:-0.04, ws:0.95, anchor:0.78, hf:hue},
+  ];
+  for(const k of field){
+    const z=ZNEAR+(pageProg-k.anchor)*SPAN;         // near at its anchor → recedes as you scroll down
+    if(z<ZNEAR||z>ZFAR) continue;                   // not reached yet, or fully receded
+    const sx=cx+k.wx*HW/z, sy=cy+k.wy*HH/z, r=base*k.ws/z;
+    if(r<3||sx<-r-4||sx>W+r+4||sy<-r-4||sy>H+r+4) continue;   // off-screen → skip
+    // fades in as it appears at the edge, bright when near, faint as it recedes to centre
+    const frac=(z-ZNEAR)/(ZFAR-ZNEAR);
+    const a=Math.min(1,frac/0.08)*Math.max(0.12,1-frac)*0.95;
+    if(a<=0.02) continue;
+    drawGlobe(sx,sy,r,k.hf,a,cosY,sinY,cosX,sinX,false);
+  }
+  // BOTTOM of the page: the largest globe sweeps in on the LEFT, cropped ~25% visible,
+  // rapidly cycling through light/pastel colours
+  const bp=Math.max(0,(pageProg-0.86)/0.14);
+  if(bp>0.002){
+    const e=bp*bp*(3-2*bp), rB=base*1.95;         // largest
+    const x=(-rB*1.7)+(-rB*0.40-(-rB*1.7))*e;     // slides to centre ≈ -0.40·r → ~25% visible
+    drawGlobe(x, cy+H*0.10, rB, hueLight, Math.min(1,bp*3), cosY,sinY,cosX,sinX, false);
   }
 
   /* smoothed pointer: the twin-sphere cursor rides it, and the orb chases it */
