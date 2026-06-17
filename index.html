@@ -282,6 +282,39 @@
     .step-fx,.hero-fx{display:none}
     #boot{display:none}
   }
+
+  /* ============ AI site guide (injected only when the backend enables it) ============ */
+  #aiFab{position:fixed;right:20px;bottom:20px;z-index:120;width:58px;height:58px;border:none;
+    border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    color:#05060A;font-size:24px;background:linear-gradient(135deg,var(--cyan),var(--violet));
+    box-shadow:0 8px 30px rgba(25,227,255,.35),0 0 0 1px rgba(255,255,255,.12);
+    transition:transform .25s ease,box-shadow .25s ease}
+  #aiFab:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 12px 38px rgba(124,92,255,.5)}
+  #aiFab.open{transform:scale(.9);opacity:.85}
+  #aiPanel{position:fixed;right:20px;bottom:90px;z-index:120;width:min(380px,calc(100vw - 40px));
+    height:min(560px,calc(100vh - 130px));display:none;flex-direction:column;overflow:hidden;
+    border-radius:18px;border:1px solid var(--line);background:rgba(10,12,20,.86);
+    backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    box-shadow:0 24px 70px rgba(0,0,0,.6);font-family:var(--body)}
+  #aiPanel.open{display:flex;animation:airise .28s ease}
+  @keyframes airise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .ai-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .ai-dot{width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  .ai-head .t{font-family:var(--display);font-weight:600;font-size:15px;color:var(--chrome)}
+  .ai-head .s{font-size:11px;color:var(--muted);margin-left:auto;font-family:var(--mono)}
+  .ai-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .ai-msg{max-width:85%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+  .ai-msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--violet),var(--cyan));color:#05060A;border-bottom-right-radius:4px}
+  .ai-msg.bot{align-self:flex-start;background:rgba(255,255,255,.06);color:var(--chrome);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .ai-msg.bot.err{border-color:var(--pink);color:#ffd0e0}
+  .ai-typing{align-self:flex-start;color:var(--muted);font-size:13px;font-family:var(--mono)}
+  .ai-foot{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
+  .ai-foot input{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:10px;
+    color:var(--chrome);padding:10px 12px;font-family:var(--body);font-size:14px;outline:none}
+  .ai-foot input:focus{border-color:var(--cyan)}
+  .ai-foot button{border:none;border-radius:10px;cursor:pointer;padding:0 14px;color:#05060A;font-weight:600;
+    background:linear-gradient(135deg,var(--cyan),var(--violet))}
+  .ai-foot button:disabled{opacity:.5;cursor:default}
 </style>
 </head>
 <body class="boot">
@@ -886,6 +919,73 @@ else { showAwaiting("offline"); statusLog("set API_URL to stream live telemetry"
     if(!r.ok)return; const {count}=await r.json();
     if(typeof count==="number") $("countLine").textContent=`${count.toLocaleString()} builders already in line.`;
   }catch{}
+})();
+
+/* =====================================================================
+   AI SITE GUIDE — a Claude-powered assistant, proxied through the backend.
+   It renders ONLY if the backend reports it's enabled (i.e. a key is set),
+   so with no key the page is untouched and nothing is ever called.
+   ===================================================================== */
+(async function aiGuide(){
+  if(!API_URL) return;
+  let enabled=false;
+  try{
+    const r=await fetch(API_URL+"/api/assistant");
+    if(r.ok) enabled=(await r.json()).enabled===true;
+  }catch{ return; }
+  if(!enabled) return;
+
+  // ---- build UI ----
+  const fab=document.createElement("button");
+  fab.id="aiFab"; fab.type="button"; fab.setAttribute("aria-label","Open the SAFAL guide"); fab.textContent="✦";
+  const panel=document.createElement("div");
+  panel.id="aiPanel"; panel.setAttribute("role","dialog"); panel.setAttribute("aria-label","SAFAL guide");
+  panel.innerHTML=
+    '<div class="ai-head"><span class="ai-dot"></span><span class="t">SAFAL guide</span><span class="s">ask anything</span></div>'+
+    '<div class="ai-body" id="aiBody"></div>'+
+    '<form class="ai-foot" id="aiForm"><input id="aiInput" type="text" placeholder="Ask about the mesh…" autocomplete="off" maxlength="2000" /><button type="submit" id="aiSend">Send</button></form>';
+  document.body.appendChild(fab); document.body.appendChild(panel);
+
+  const body=$("aiBody"), input=$("aiInput"), sendBtn=$("aiSend"), formEl=$("aiForm");
+  const history=[]; // {role, content} sent to the API
+  let busy=false;
+
+  const scroll=()=>{ body.scrollTop=body.scrollHeight; };
+  function render(role,text,isErr){
+    const el=document.createElement("div");
+    el.className="ai-msg "+(role==="user"?"user":"bot")+(isErr?" err":"");
+    el.textContent=text; // textContent = no HTML injection from model output
+    body.appendChild(el); scroll(); return el;
+  }
+  function open(v){
+    panel.classList.toggle("open",v); fab.classList.toggle("open",v);
+    fab.textContent=v?"×":"✦";
+    if(v){ input.focus(); if(!history.length && !body.children.length)
+      render("bot","Hi — I'm the SAFAL guide. Ask me what the compute mesh is, how the live telemetry works, or how to join the waitlist."); }
+  }
+  fab.addEventListener("click",()=>open(!panel.classList.contains("open")));
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&panel.classList.contains("open")) open(false); });
+
+  formEl.addEventListener("submit",async e=>{
+    e.preventDefault();
+    const text=input.value.trim(); if(!text||busy) return;
+    input.value=""; busy=true; sendBtn.disabled=true;
+    render("user",text); history.push({role:"user",content:text});
+    const typing=document.createElement("div"); typing.className="ai-typing"; typing.textContent="thinking…";
+    body.appendChild(typing); scroll();
+    try{
+      const r=await fetch(API_URL+"/api/assistant",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:history})
+      });
+      const d=await r.json().catch(()=>({}));
+      typing.remove();
+      if(!r.ok||!d.reply){ render("bot",d.error||"The guide is unavailable right now.",true); }
+      else{ render("bot",d.reply); history.push({role:"assistant",content:d.reply}); }
+    }catch{
+      typing.remove(); render("bot","Couldn't reach the guide. Check your connection and try again.",true);
+    }finally{ busy=false; sendBtn.disabled=false; input.focus(); }
+  });
 })();
 
 /* ===== waitlist form ===== */
