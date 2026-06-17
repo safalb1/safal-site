@@ -1040,6 +1040,48 @@ for(let i=0;i<P;i++)parts.push({x:Math.random()*W,y:Math.random()*H,
 let mx=cx,my=cy,t=0,zoomEase=0;
 addEventListener("pointermove",e=>{mx=e.clientX;my=e.clientY;});
 function hue(o){const base=185+Math.sin(t*0.0004)*60;return `hsla(${base+o},90%,62%,`;}
+// bright yellow that rapidly cycles its colour (for the left companion globe)
+function hueWild(o){const base=(48+t*4+o)%360;return `hsla(${base},98%,60%,`;}
+// silver-white that shifts its tint slowly (for the small right companion globe)
+function hueSilver(o){const base=(t*0.5+o)%360;return `hsla(${base},24%,86%,`;}
+
+/* draw one network globe (rings + rotating wireframe + glow) at (gx,gy) with
+   radius gRad, colour from hf(offset) and overall opacity al. Rotation is shared
+   so every globe spins in sync. Reuses the precomputed nodes/edges. */
+function drawGlobe(gx,gy,gRad,hf,al,cosY,sinY,cosX,sinX,rings=true){
+  if(al<=0.003||gRad<=1) return;
+  ctx.save(); ctx.globalAlpha=al;
+  if(rings && !reduced){                          // orbiting rings (the faint "galaxy" lines)
+    for(let k=0;k<3;k++){
+      const rr=gRad*(1.25+k*0.22), tilt=0.34+k*0.08, rot=t*(0.0006+k*0.0002);
+      ctx.strokeStyle=hf(k*20)+"0.10)";ctx.lineWidth=0.8;ctx.beginPath();
+      for(let a=0;a<=Math.PI*2+0.1;a+=0.12){
+        const x=Math.cos(a+rot)*rr, z=Math.sin(a+rot)*rr;
+        a===0?ctx.moveTo(gx+x,gy+z*tilt):ctx.lineTo(gx+x,gy+z*tilt);
+      }
+      ctx.stroke();
+    }
+  }
+  const proj=[];                                  // rotating wireframe core
+  for(const n of nodes){
+    let x=n.x*cosY-n.z*sinY,z=n.x*sinY+n.z*cosY,y=n.y;
+    let y2=y*cosX-z*sinX;z=y*sinX+z*cosX;y=y2;
+    const persp=gRad*2.4/(gRad*2.4-z*gRad);
+    proj.push({sx:gx+x*gRad*persp,sy:gy+y*gRad*persp,z});
+  }
+  for(const[i,j]of edges){const a=proj[i],b=proj[j];
+    const depth=(a.z+b.z)/2, ea=0.10+(depth+1)/2*0.42;
+    ctx.strokeStyle=hf(0)+ea.toFixed(3)+")";ctx.lineWidth=0.6+(depth+1)/2*0.8;
+    ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
+  }
+  for(const p of proj){const na=0.3+(p.z+1)/2*0.7,s=0.8+(p.z+1)/2*1.8;
+    ctx.fillStyle=hf(30)+na.toFixed(3)+")";ctx.beginPath();ctx.arc(p.sx,p.sy,s,0,7);ctx.fill();
+  }
+  const g=ctx.createRadialGradient(gx,gy,0,gx,gy,gRad*1.6);
+  g.addColorStop(0,hf(0)+"0.05)");g.addColorStop(1,"transparent");
+  ctx.fillStyle=g;ctx.fillRect(gx-gRad*1.6,gy-gRad*1.6,gRad*3.2,gRad*3.2);
+  ctx.restore();
+}
 
 function frame(){
   t++;ctx.clearRect(0,0,W,H);
@@ -1078,48 +1120,33 @@ function frame(){
   for(const p of parts){ctx.fillStyle=hue(40)+"0.5)";ctx.fillRect(p.x,p.y,1.4,1.4);}
   ctx.restore();
 
-  /* ===== network globe — recedes + fades as you scroll down ===== */
-  ctx.save(); ctx.globalAlpha=globeFade;
-
-  /* orbiting rings */
+  /* ===== network globes ===== */
   const rad=R()*globeScale;
-  if(!reduced){
-    for(let k=0;k<3;k++){
-      const rr=rad*(1.25+k*0.22), tilt=0.34+k*0.08, rot=t*(0.0006+k*0.0002);
-      ctx.strokeStyle=hue(k*20)+(0.10)+")";ctx.lineWidth=0.8;ctx.beginPath();
-      for(let a=0;a<=Math.PI*2+0.1;a+=0.12){
-        const x=Math.cos(a+rot)*rr, z=Math.sin(a+rot)*rr;
-        const sx=cx+x, sy=cy+z*tilt;
-        a===0?ctx.moveTo(sx,sy):ctx.lineTo(sx,sy);
-      }
-      ctx.stroke();
-    }
-  }
-
-  /* rotating wireframe core */
   const ry=reduced?0.4:t*0.0016+(mx-cx)*0.00018;
   const rx=reduced?0.3:t*0.0009+(my-cy)*0.00018;
   const cosY=Math.cos(ry),sinY=Math.sin(ry),cosX=Math.cos(rx),sinX=Math.sin(rx);
-  const proj=[];
-  for(const n of nodes){
-    let x=n.x*cosY-n.z*sinY,z=n.x*sinY+n.z*cosY,y=n.y;
-    let y2=y*cosX-z*sinX;z=y*sinX+z*cosX;y=y2;
-    const persp=rad*2.4/(rad*2.4-z*rad);
-    proj.push({sx:cx+x*rad*persp,sy:cy+y*rad*persp,z,p:persp});
-  }
-  for(const[i,j]of edges){const a=proj[i],b=proj[j];
-    const depth=(a.z+b.z)/2;const al=0.10+(depth+1)/2*0.42;
-    ctx.strokeStyle=hue(0)+al.toFixed(3)+")";ctx.lineWidth=0.6+(depth+1)/2*0.8;
-    ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
-  }
-  for(const p of proj){const al=0.3+(p.z+1)/2*0.7,s=0.8+(p.z+1)/2*1.8;
-    ctx.fillStyle=hue(30)+al.toFixed(3)+")";ctx.beginPath();ctx.arc(p.sx,p.sy,s,0,7);ctx.fill();
-  }
-  const g=ctx.createRadialGradient(cx,cy,0,cx,cy,rad*1.6);
-  g.addColorStop(0,hue(0)+"0.05)");g.addColorStop(1,"transparent");
-  ctx.fillStyle=g;ctx.fillRect(cx-rad*1.6,cy-rad*1.6,rad*3.2,rad*3.2);
 
-  ctx.restore(); /* end network globe alpha group */
+  // main globe — recedes + fades as you scroll down
+  drawGlobe(cx,cy,rad,hue,globeFade,cosY,sinY,cosX,sinX);
+
+  // companion globes — hidden at load; they SLIDE in from the screen edges as you
+  // scroll DOWN and slide back out as you scroll UP (driven by scroll position, so
+  // zoom-in and zoom-out feel symmetric).
+  const slide=Math.max(0,Math.min(1,(zoomEase-0.04)/0.55));
+  if(slide>0.003){
+    const base=R();
+    const s01=slide*slide*(3-2*slide);                    // smoothed slide
+    const lerp=(a,b)=>a+(b-a)*s01;
+    // left · slightly smaller · fully visible · bright yellow rapidly shifting · enters from the LEFT edge
+    const rL=base*0.80, fxL=cx-W*0.31, fyL=cy+H*0.05;
+    drawGlobe(lerp(-rL*1.9, fxL), fyL, rL, hueWild, Math.min(1,slide*1.4), cosY,sinY,cosX,sinX, false);
+    // right · ~30% size · silver-white slowly shifting · partly visible · enters from the RIGHT edge
+    const rR=base*0.30, fxR=cx+W*0.31, fyR=cy+H*0.17;
+    drawGlobe(lerp(W+rR*1.9, fxR), fyR, rR, hueSilver, Math.min(0.6,slide*0.95), cosY,sinY,cosX,sinX, false);
+    // top-right · truncated by the corner · enters diagonally from the top-right edge
+    const rT=base*0.60, fxT=W*0.93, fyT=H*0.10;
+    drawGlobe(lerp(W+rT*1.6, fxT), lerp(-rT*1.6, fyT), rT, hue, Math.min(1,slide*1.4), cosY,sinY,cosX,sinX, false);
+  }
 
   /* smoothed pointer: the twin-sphere cursor rides it, and the orb chases it */
   if(!cReady){cursorX=mx;cursorY=my;cReady=true;}
