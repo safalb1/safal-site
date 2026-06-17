@@ -831,62 +831,52 @@ function paintMetrics(m){
   if(m.clients!=null) $("rClients").textContent=m.clients;
   if(m.signups!=null) $("rSignups").textContent=Number(m.signups).toLocaleString();
 }
-const logMsgs=["replica placed","node rejoined mesh","weights synced","route table updated","autoscale +1 node","cache warmed","health gossip ok"];
-const warnMsgs=["node drained, rerouting","backpressure on edge-eu","cold start mitigated"];
-function logLine(){
-  const c=$("console"); if(!c) return;
-  const warn=Math.random()<0.18;
-  const ts=new Date().toLocaleTimeString("en-GB");
-  const cls=warn?"wn":"ok"; const tag=warn?"WARN":"OK ";
-  const msg=warn?warnMsgs[Math.random()*warnMsgs.length|0]:logMsgs[Math.random()*logMsgs.length|0];
-  const region=["us-east","eu-west","ap-south","sa-east"][Math.random()*4|0];
-  const ln=document.createElement("div"); ln.className="ln";
-  ln.innerHTML=`<span class="ts">${ts}</span> <span class="${cls}">[${tag}]</span> ${region} · ${msg}`;
-  c.appendChild(ln);
-  while(c.children.length>9)c.removeChild(c.firstChild);
+/* No fabricated data, ever. Until the live stream connects we show an honest
+   "—" resting state and a clear status — never invented numbers. */
+function showAwaiting(label){
+  $("src").textContent=label;
+  const ls=$("liveState"); if(ls) ls.textContent=label;
+  $("nodes").textContent="—"; $("tps").textContent="—"; $("lat").textContent="—";
+  setBar("mGpu","mGpuV",0,"—"); setBar("mTps","mTpsV",0,"—");
+  setBar("mLat","mLatV",0,"—"); setBar("mQ","mQV",0,"—");
 }
-
-function startSimulation(){
-  $("src").textContent="simulated";
-  const t0=Date.now();
-  let s={nodes:4096,tps:1.21e6,lat:38,gpu:74,queue:640};
-  function tick(){
-    s.nodes=4096+Math.round(Math.sin(Date.now()/4000)*30+ (Math.random()*20-10));
-    s.tps=1.1e6+Math.random()*0.3e6;
-    s.lat=36+Math.random()*6;
-    s.gpu=68+Math.random()*22;
-    s.queue=400+Math.random()*1200;
-    s.uptime=(Date.now()-t0)/1000; // real browser-session uptime
-    paintMetrics(s);
-  }
-  tick(); if(reduced)return;
-  setInterval(tick,2000);
-  setInterval(logLine,1600);
-  logLine();logLine();logLine();
+function statusLog(text){
+  const c=$("console"); if(!c) return;
+  c.innerHTML="";
+  const ln=document.createElement("div"); ln.className="ln";
+  ln.innerHTML=`<span class="ts">${new Date().toLocaleTimeString("en-GB")}</span> <span class="ok">[··]</span> ${text}`;
+  c.appendChild(ln);
 }
 
 function startLive(){
-  try{
-    const es=new EventSource(API_URL+"/api/live");
-    let ok=false;
-    es.addEventListener("metrics",ev=>{
-      ok=true; $("src").textContent="live"; $("liveState").textContent="live";
-      try{paintMetrics(JSON.parse(ev.data));}catch{}
-    });
-    es.addEventListener("log",ev=>{
-      const c=$("console"); if(!c)return;
-      let d; try{d=JSON.parse(ev.data);}catch{return;}
-      const ln=document.createElement("div");ln.className="ln";
-      ln.innerHTML=`<span class="ts">${d.ts||""}</span> <span class="${d.level==='WARN'?'wn':'ok'}">[${d.level||'OK'}]</span> ${d.msg||''}`;
-      c.appendChild(ln); while(c.children.length>9)c.removeChild(c.firstChild);
-    });
-    es.onerror=()=>{ if(!ok){ es.close(); startSimulation(); } };
-    // safety: if no event within 4s, fall back
-    setTimeout(()=>{ if(!ok){ es.close(); startSimulation(); } },4000);
-  }catch{ startSimulation(); }
+  showAwaiting("connecting…");
+  statusLog("connecting to live mesh telemetry…");
+  let es;
+  try{ es=new EventSource(API_URL+"/api/live"); }
+  catch{ showAwaiting("offline"); statusLog("live telemetry unavailable"); return; }
+  let ok=false;
+  es.addEventListener("metrics",ev=>{
+    ok=true; $("src").textContent="live"; const ls=$("liveState"); if(ls) ls.textContent="live";
+    try{paintMetrics(JSON.parse(ev.data));}catch{}
+  });
+  es.addEventListener("log",ev=>{
+    const c=$("console"); if(!c)return;
+    let d; try{d=JSON.parse(ev.data);}catch{return;}
+    const ln=document.createElement("div");ln.className="ln";
+    ln.innerHTML=`<span class="ts">${d.ts||""}</span> <span class="${d.level==='WARN'?'wn':'ok'}">[${d.level||'OK'}]</span> ${d.msg||''}`;
+    c.appendChild(ln); while(c.children.length>9)c.removeChild(c.firstChild);
+  });
+  // EventSource auto-reconnects (server sends `retry: 3000`). While the backend
+  // is waking from sleep we show an honest "reconnecting" state, not fake data.
+  es.onerror=()=>{
+    const ls=$("liveState");
+    if(!ok){ showAwaiting("connecting…"); if(ls) ls.textContent="reconnecting"; }
+    else if(ls){ ls.textContent="reconnecting"; }
+  };
 }
 
-if(API_URL) startLive(); else startSimulation();
+if(API_URL) startLive();
+else { showAwaiting("offline"); statusLog("set API_URL to stream live telemetry"); }
 
 /* ===== live signup count ===== */
 (async function count(){
